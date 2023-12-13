@@ -31,10 +31,7 @@ def estimate_background_color(image, sample_points=5):
         (w // 2, h // 2),
     ]
 
-    colors = []
-    for x, y in points:
-        colors.append(image[y, x])
-
+    colors = [image[y, x] for x, y in points]
     return np.median(colors, axis=0)
 
 def auto_rotate(image, angle_threshold=1):
@@ -45,13 +42,9 @@ def auto_rotate(image, angle_threshold=1):
     if lines is None:
         return image
 
-    # compute the median angle of the lines
-    angles = []
-    for rho, theta in lines[:, 0]:
-        angles.append((theta * 180) / np.pi - 90)
-    
+    angles = [(theta * 180) / np.pi - 90 for rho, theta in lines[:, 0]]
     angle = np.median(angles)
-    
+
     if abs(angle) < angle_threshold:
         return image
 
