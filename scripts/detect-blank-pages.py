@@ -37,9 +37,9 @@ if __name__ == "__main__":
     parser.add_argument('-w', '--white_percent', type=float, default=99, help='The percentage of white pixels for an image to be considered blank. The default value is 99.')
     args = parser.parse_args()
 
-    blank = is_blank_image(args.image_path, args.threshold, args.white_percent)
-
-    if blank:
+    if blank := is_blank_image(
+        args.image_path, args.threshold, args.white_percent
+    ):
         # Return code 1: The image is considered blank.
         sys.exit(1)
     else:
