@@ -14,9 +14,19 @@ import org.springframework.web.servlet.ModelAndView;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import stirling.software.SPDF.model.ApplicationProperties;
+import stirling.software.SPDF.utils.CheckProgramInstall;
+
 @Controller
 @Tag(name = "Misc", description = "Miscellaneous APIs")
 public class OtherWebController {
+
+    private final ApplicationProperties applicationProperties;
+
+    public OtherWebController(ApplicationProperties applicationProperties) {
+        this.applicationProperties = applicationProperties;
+    }
+
     @GetMapping("/compress-pdf")
     @Hidden
     public String compressPdfForm(Model model) {
@@ -24,10 +34,19 @@ public class OtherWebController {
         return "misc/compress-pdf";
     }
 
+    @GetMapping("/replace-and-invert-color-pdf")
+    @Hidden
+    public String replaceAndInvertColorPdfForm(Model model) {
+        model.addAttribute("currentPage", "replace-invert-color-pdf");
+        return "misc/replace-color";
+    }
+
     @GetMapping("/extract-image-scans")
     @Hidden
     public ModelAndView extractImageScansForm() {
         ModelAndView modelAndView = new ModelAndView("misc/extract-image-scans");
+        boolean isPython = CheckProgramInstall.isPythonAvailable();
+        modelAndView.addObject("isPython", isPython);
         modelAndView.addObject("currentPage", "extract-image-scans");
         return modelAndView;
     }
@@ -39,11 +58,25 @@ public class OtherWebController {
         return "misc/show-javascript";
     }
 
+    @GetMapping("/stamp")
+    @Hidden
+    public String stampForm(Model model) {
+        model.addAttribute("currentPage", "stamp");
+        return "misc/stamp";
+    }
+
     @GetMapping("/add-page-numbers")
     @Hidden
     public String addPageNumbersForm(Model model) {
         model.addAttribute("currentPage", "add-page-numbers");
         return "misc/add-page-numbers";
+    }
+
+    @GetMapping("/fake-scan")
+    @Hidden
+    public String fakeScanForm(Model model) {
+        model.addAttribute("currentPage", "fake-scan");
+        return "misc/fake-scan";
     }
 
     @GetMapping("/extract-images")
@@ -74,8 +107,15 @@ public class OtherWebController {
         return "misc/compare";
     }
 
+    @GetMapping("/print-file")
+    @Hidden
+    public String printFileForm(Model model) {
+        model.addAttribute("currentPage", "print-file");
+        return "misc/print-file";
+    }
+
     public List<String> getAvailableTesseractLanguages() {
-        String tessdataDir = "/usr/share/tesseract-ocr/5/tessdata";
+        String tessdataDir = applicationProperties.getSystem().getTessdataDir();
         File[] files = new File(tessdataDir).listFiles();
         if (files == null) {
             return Collections.emptyList();

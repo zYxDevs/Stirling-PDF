@@ -7,24 +7,27 @@ import java.util.Calendar;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.WebDataBinder;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import lombok.extern.slf4j.Slf4j;
 import stirling.software.SPDF.model.api.misc.MetadataRequest;
 import stirling.software.SPDF.utils.WebResponseUtils;
+import stirling.software.SPDF.utils.propertyeditor.StringToMapPropertyEditor;
 
 @RestController
 @RequestMapping("/api/v1/misc")
+@Slf4j
 @Tag(name = "Misc", description = "Miscellaneous APIs")
 public class MetadataController {
 
@@ -36,6 +39,11 @@ public class MetadataController {
         }
         // Return the original string if it's not "undefined"
         return entry;
+    }
+
+    @InitBinder
+    public void initBinder(WebDataBinder binder) {
+        binder.registerCustomEditor(Map.class, "allRequestParams", new StringToMapPropertyEditor());
     }
 
     @PostMapping(consumes = "multipart/form-data", value = "/update-metadata")
@@ -67,7 +75,7 @@ public class MetadataController {
             allRequestParams = new java.util.HashMap<String, String>();
         }
         // Load the PDF file into a PDDocument
-        PDDocument document = PDDocument.load(pdfFile.getBytes());
+        PDDocument document = Loader.loadPDF(pdfFile.getBytes());
 
         // Get the document information from the PDF
         PDDocumentInformation info = document.getDocumentInformation();
@@ -108,15 +116,15 @@ public class MetadataController {
             for (Entry<String, String> entry : allRequestParams.entrySet()) {
                 String key = entry.getKey();
                 // Check if the key is a standard metadata key
-                if (!key.equalsIgnoreCase("Author")
-                        && !key.equalsIgnoreCase("CreationDate")
-                        && !key.equalsIgnoreCase("Creator")
-                        && !key.equalsIgnoreCase("Keywords")
-                        && !key.equalsIgnoreCase("modificationDate")
-                        && !key.equalsIgnoreCase("Producer")
-                        && !key.equalsIgnoreCase("Subject")
-                        && !key.equalsIgnoreCase("Title")
-                        && !key.equalsIgnoreCase("Trapped")
+                if (!"Author".equalsIgnoreCase(key)
+                        && !"CreationDate".equalsIgnoreCase(key)
+                        && !"Creator".equalsIgnoreCase(key)
+                        && !"Keywords".equalsIgnoreCase(key)
+                        && !"modificationDate".equalsIgnoreCase(key)
+                        && !"Producer".equalsIgnoreCase(key)
+                        && !"Subject".equalsIgnoreCase(key)
+                        && !"Title".equalsIgnoreCase(key)
+                        && !"Trapped".equalsIgnoreCase(key)
                         && !key.contains("customKey")
                         && !key.contains("customValue")) {
                     info.setCustomMetadataValue(key, entry.getValue());
@@ -134,7 +142,7 @@ public class MetadataController {
                 creationDateCal.setTime(
                         new SimpleDateFormat("yyyy/MM/dd HH:mm:ss").parse(creationDate));
             } catch (ParseException e) {
-                e.printStackTrace();
+                log.error("exception", e);
             }
             info.setCreationDate(creationDateCal);
         } else {
@@ -146,7 +154,7 @@ public class MetadataController {
                 modificationDateCal.setTime(
                         new SimpleDateFormat("yyyy/MM/dd HH:mm:ss").parse(modificationDate));
             } catch (ParseException e) {
-                e.printStackTrace();
+                log.error("exception", e);
             }
             info.setModificationDate(modificationDateCal);
         } else {
@@ -163,6 +171,8 @@ public class MetadataController {
         document.setDocumentInformation(info);
         return WebResponseUtils.pdfDocToWebResponse(
                 document,
-                pdfFile.getOriginalFilename().replaceFirst("[.][^.]+$", "") + "_metadata.pdf");
+                Filenames.toSimpleFileName(pdfFile.getOriginalFilename())
+                                .replaceFirst("[.][^.]+$", "")
+                        + "_metadata.pdf");
     }
 }

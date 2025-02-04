@@ -5,11 +5,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,21 +16,22 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import lombok.extern.slf4j.Slf4j;
 import stirling.software.SPDF.model.api.misc.ExtractHeaderRequest;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
 @RestController
 @RequestMapping("/api/v1/misc")
+@Slf4j
 @Tag(name = "Misc", description = "Miscellaneous APIs")
 public class AutoRenameController {
 
-    private static final Logger logger = LoggerFactory.getLogger(AutoRenameController.class);
-
     private static final float TITLE_FONT_SIZE_THRESHOLD = 20.0f;
-    private static final int LINE_LIMIT = 11;
+    private static final int LINE_LIMIT = 200;
 
     @PostMapping(consumes = "multipart/form-data", value = "/auto-rename")
     @Operation(
@@ -43,19 +43,9 @@ public class AutoRenameController {
         MultipartFile file = request.getFileInput();
         Boolean useFirstTextAsFallback = request.isUseFirstTextAsFallback();
 
-        PDDocument document = PDDocument.load(file.getInputStream());
+        PDDocument document = Loader.loadPDF(file.getBytes());
         PDFTextStripper reader =
                 new PDFTextStripper() {
-                    class LineInfo {
-                        String text;
-                        float fontSize;
-
-                        LineInfo(String text, float fontSize) {
-                            this.text = text;
-                            this.fontSize = fontSize;
-                        }
-                    }
-
                     List<LineInfo> lineInfos = new ArrayList<>();
                     StringBuilder lineBuilder = new StringBuilder();
                     float lastY = -1;
@@ -122,17 +112,28 @@ public class AutoRenameController {
                                                         .text)
                                         : null);
                     }
+
+                    class LineInfo {
+                        String text;
+                        float fontSize;
+
+                        LineInfo(String text, float fontSize) {
+                            this.text = text;
+                            this.fontSize = fontSize;
+                        }
+                    }
                 };
 
         String header = reader.getText(document);
 
         // Sanitize the header string by removing characters not allowed in a filename.
         if (header != null && header.length() < 255) {
-            header = header.replaceAll("[/\\\\?%*:|\"<>]", "");
+            header = header.replaceAll("[/\\\\?%*:|\"<>]", "").trim();
             return WebResponseUtils.pdfDocToWebResponse(document, header + ".pdf");
         } else {
-            logger.info("File has no good title to be found");
-            return WebResponseUtils.pdfDocToWebResponse(document, file.getOriginalFilename());
+            log.info("File has no good title to be found");
+            return WebResponseUtils.pdfDocToWebResponse(
+                    document, Filenames.toSimpleFileName(file.getOriginalFilename()));
         }
     }
 }

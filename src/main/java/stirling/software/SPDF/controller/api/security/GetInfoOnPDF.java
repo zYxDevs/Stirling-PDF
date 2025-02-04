@@ -4,27 +4,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
-import org.apache.pdfbox.cos.COSDocument;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSInputStream;
 import org.apache.pdfbox.cos.COSName;
-import org.apache.pdfbox.cos.COSObject;
-import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.cos.COSString;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
-import org.apache.pdfbox.pdmodel.PDDocumentInformation;
-import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
-import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
-import org.apache.pdfbox.pdmodel.PDJavascriptNameTreeNode;
-import org.apache.pdfbox.pdmodel.PDPage;
-import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDMetadata;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.common.PDStream;
@@ -73,21 +59,65 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import lombok.extern.slf4j.Slf4j;
 import stirling.software.SPDF.model.api.PDFFile;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
 @RestController
 @RequestMapping("/api/v1/security")
+@Slf4j
 @Tag(name = "Security", description = "Security APIs")
 public class GetInfoOnPDF {
 
     static ObjectMapper objectMapper = new ObjectMapper();
 
+    private static void addOutlinesToArray(PDOutlineItem outline, ArrayNode arrayNode) {
+        if (outline == null) return;
+
+        ObjectNode outlineNode = objectMapper.createObjectNode();
+        outlineNode.put("Title", outline.getTitle());
+        // You can add other properties if needed
+        arrayNode.add(outlineNode);
+
+        PDOutlineItem child = outline.getFirstChild();
+        while (child != null) {
+            addOutlinesToArray(child, arrayNode);
+            child = child.getNextSibling();
+        }
+    }
+
+    public static boolean checkForStandard(PDDocument document, String standardKeyword) {
+        // Check XMP Metadata
+        try {
+            PDMetadata pdMetadata = document.getDocumentCatalog().getMetadata();
+            if (pdMetadata != null) {
+                COSInputStream metaStream = pdMetadata.createInputStream();
+                DomXmpParser domXmpParser = new DomXmpParser();
+                XMPMetadata xmpMeta = domXmpParser.parse(metaStream);
+
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                new XmpSerializer().serialize(xmpMeta, baos, true);
+                String xmpString = new String(baos.toByteArray(), StandardCharsets.UTF_8);
+
+                if (xmpString.contains(standardKeyword)) {
+                    return true;
+                }
+            }
+        } catch (
+                Exception
+                        e) { // Catching general exception for brevity, ideally you'd catch specific
+            // exceptions.
+            log.error("exception", e);
+        }
+
+        return false;
+    }
+
     @PostMapping(consumes = "multipart/form-data", value = "/get-info-on-pdf")
     @Operation(summary = "Summary here", description = "desc. Input:PDF Output:JSON Type:SISO")
     public ResponseEntity<byte[]> getPdfInfo(@ModelAttribute PDFFile request) throws IOException {
         MultipartFile inputFile = request.getFileInput();
-        try (PDDocument pdfBoxDoc = PDDocument.load(inputFile.getInputStream()); ) {
+        try (PDDocument pdfBoxDoc = Loader.loadPDF(inputFile.getBytes()); ) {
             ObjectMapper objectMapper = new ObjectMapper();
             ObjectNode jsonOutput = objectMapper.createObjectNode();
 
@@ -129,17 +159,6 @@ public class GetInfoOnPDF {
             boolean hasCompression = false;
             String compressionType = "None";
 
-            COSDocument cosDoc = pdfBoxDoc.getDocument();
-            for (COSObject cosObject : cosDoc.getObjects()) {
-                if (cosObject.getObject() instanceof COSStream) {
-                    COSStream cosStream = (COSStream) cosObject.getObject();
-                    if (COSName.OBJ_STM.equals(cosStream.getItem(COSName.TYPE))) {
-                        hasCompression = true;
-                        compressionType = "Object Streams";
-                        break;
-                    }
-                }
-            }
             basicInfo.put("Compression", hasCompression);
             if (hasCompression) basicInfo.put("CompressionType", compressionType);
 
@@ -233,7 +252,7 @@ public class GetInfoOnPDF {
                             javascriptArray.add(jsNode);
                         }
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        log.error("exception", e);
                     }
                 }
             }
@@ -266,7 +285,7 @@ public class GetInfoOnPDF {
                 }
             } catch (Exception e) {
                 // TODO Auto-generated catch block
-                e.printStackTrace();
+                log.error("exception", e);
             }
 
             boolean isPdfACompliant = checkForStandard(pdfBoxDoc, "PDF/A");
@@ -318,7 +337,7 @@ public class GetInfoOnPDF {
                     new XmpSerializer().serialize(xmpMeta, os, true);
                     xmpString = new String(os.toByteArray(), StandardCharsets.UTF_8);
                 } catch (XmpParsingException | IOException e) {
-                    e.printStackTrace();
+                    log.error("exception", e);
                 }
             }
 
@@ -331,27 +350,13 @@ public class GetInfoOnPDF {
                 PDEncryption pdfEncryption = pdfBoxDoc.getEncryption();
                 encryption.put("EncryptionAlgorithm", pdfEncryption.getFilter());
                 encryption.put("KeyLength", pdfEncryption.getLength());
-                AccessPermission ap = pdfBoxDoc.getCurrentAccessPermission();
-                if (ap != null) {
-                    ObjectNode permissionsNode = objectMapper.createObjectNode();
-
-                    permissionsNode.put("CanAssembleDocument", ap.canAssembleDocument());
-                    permissionsNode.put("CanExtractContent", ap.canExtractContent());
-                    permissionsNode.put(
-                            "CanExtractForAccessibility", ap.canExtractForAccessibility());
-                    permissionsNode.put("CanFillInForm", ap.canFillInForm());
-                    permissionsNode.put("CanModify", ap.canModify());
-                    permissionsNode.put("CanModifyAnnotations", ap.canModifyAnnotations());
-                    permissionsNode.put("CanPrint", ap.canPrint());
-                    permissionsNode.put("CanPrintDegraded", ap.canPrintDegraded());
-
-                    encryption.set(
-                            "Permissions", permissionsNode); // set the node under "Permissions"
-                }
                 // Add other encryption-related properties as needed
             } else {
                 encryption.put("IsEncrypted", false);
             }
+
+            ObjectNode permissionsNode = objectMapper.createObjectNode();
+            setNodePermissions(pdfBoxDoc, permissionsNode);
 
             ObjectNode pageInfoParent = objectMapper.createObjectNode();
             for (int pageNum = 0; pageNum < pdfBoxDoc.getNumberOfPages(); pageNum++) {
@@ -594,6 +599,7 @@ public class GetInfoOnPDF {
             jsonOutput.set("DocumentInfo", docInfoNode);
             jsonOutput.set("Compliancy", compliancy);
             jsonOutput.set("Encryption", encryption);
+            jsonOutput.set("Permissions", permissionsNode); // set the node under "Permissions"
             jsonOutput.set("Other", other);
             jsonOutput.set("PerPageInfo", pageInfoParent);
 
@@ -607,24 +613,27 @@ public class GetInfoOnPDF {
                     MediaType.APPLICATION_JSON);
 
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("exception", e);
         }
         return null;
     }
 
-    private static void addOutlinesToArray(PDOutlineItem outline, ArrayNode arrayNode) {
-        if (outline == null) return;
+    private void setNodePermissions(PDDocument pdfBoxDoc, ObjectNode permissionsNode) {
+        AccessPermission ap = pdfBoxDoc.getCurrentAccessPermission();
 
-        ObjectNode outlineNode = objectMapper.createObjectNode();
-        outlineNode.put("Title", outline.getTitle());
-        // You can add other properties if needed
-        arrayNode.add(outlineNode);
+        permissionsNode.put("Document Assembly", getPermissionState(ap.canAssembleDocument()));
+        permissionsNode.put("Extracting Content", getPermissionState(ap.canExtractContent()));
+        permissionsNode.put(
+                "Extracting for accessibility",
+                getPermissionState(ap.canExtractForAccessibility()));
+        permissionsNode.put("Form Filling", getPermissionState(ap.canFillInForm()));
+        permissionsNode.put("Modifying", getPermissionState(ap.canModify()));
+        permissionsNode.put("Modifying annotations", getPermissionState(ap.canModifyAnnotations()));
+        permissionsNode.put("Printing", getPermissionState(ap.canPrint()));
+    }
 
-        PDOutlineItem child = outline.getFirstChild();
-        while (child != null) {
-            addOutlinesToArray(child, arrayNode);
-            child = child.getNextSibling();
-        }
+    private String getPermissionState(boolean state) {
+        return state ? "Allowed" : "Not Allowed";
     }
 
     public String getPageOrientation(double width, double height) {
@@ -682,33 +691,6 @@ public class GetInfoOnPDF {
         dimensionInfo.put("Width (cm)", String.format("%.2f", widthInCm));
         dimensionInfo.put("Height (cm)", String.format("%.2f", heightInCm));
         return dimensionInfo;
-    }
-
-    public static boolean checkForStandard(PDDocument document, String standardKeyword) {
-        // Check XMP Metadata
-        try {
-            PDMetadata pdMetadata = document.getDocumentCatalog().getMetadata();
-            if (pdMetadata != null) {
-                COSInputStream metaStream = pdMetadata.createInputStream();
-                DomXmpParser domXmpParser = new DomXmpParser();
-                XMPMetadata xmpMeta = domXmpParser.parse(metaStream);
-
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                new XmpSerializer().serialize(xmpMeta, baos, true);
-                String xmpString = new String(baos.toByteArray(), StandardCharsets.UTF_8);
-
-                if (xmpString.contains(standardKeyword)) {
-                    return true;
-                }
-            }
-        } catch (
-                Exception
-                        e) { // Catching general exception for brevity, ideally you'd catch specific
-            // exceptions.
-            e.printStackTrace();
-        }
-
-        return false;
     }
 
     public ArrayNode exploreStructureTree(List<Object> nodes) {

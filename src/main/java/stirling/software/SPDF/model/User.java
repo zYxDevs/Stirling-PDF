@@ -1,28 +1,19 @@
 package stirling.software.SPDF.model;
 
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import jakarta.persistence.CascadeType;
-import jakarta.persistence.CollectionTable;
-import jakarta.persistence.Column;
-import jakarta.persistence.ElementCollection;
-import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.MapKeyColumn;
-import jakarta.persistence.OneToMany;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 
 @Entity
 @Table(name = "users")
-public class User {
+public class User implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -44,14 +35,25 @@ public class User {
     @Column(name = "isFirstLogin")
     private Boolean isFirstLogin = false;
 
+    @Column(name = "roleName")
+    private String roleName;
+
+    @Column(name = "authenticationtype")
+    private String authenticationType;
+
     @OneToMany(fetch = FetchType.EAGER, cascade = CascadeType.ALL, mappedBy = "user")
     private Set<Authority> authorities = new HashSet<>();
 
     @ElementCollection
     @MapKeyColumn(name = "setting_key")
-    @Column(name = "setting_value")
+    @Lob
+    @Column(name = "setting_value", columnDefinition = "text")
     @CollectionTable(name = "user_settings", joinColumns = @JoinColumn(name = "user_id"))
     private Map<String, String> settings = new HashMap<>(); // Key-value pairs of settings.
+
+    public String getRoleName() {
+        return Role.getRoleNameByRoleId(getRolesAsString());
+    }
 
     public boolean isFirstLogin() {
         return isFirstLogin != null && isFirstLogin;
@@ -109,6 +111,14 @@ public class User {
         this.enabled = enabled;
     }
 
+    public String getAuthenticationType() {
+        return authenticationType;
+    }
+
+    public void setAuthenticationType(AuthenticationType authenticationType) {
+        this.authenticationType = authenticationType.toString().toLowerCase();
+    }
+
     public Set<Authority> getAuthorities() {
         return authorities;
     }
@@ -129,5 +139,9 @@ public class User {
         return this.authorities.stream()
                 .map(Authority::getAuthority)
                 .collect(Collectors.joining(", "));
+    }
+
+    public boolean hasPassword() {
+        return this.password != null && !this.password.isEmpty();
     }
 }

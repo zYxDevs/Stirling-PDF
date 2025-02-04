@@ -18,6 +18,12 @@ public class SecurityWebController {
         return "security/auto-redact";
     }
 
+    @GetMapping("/redact")
+    public String redactForm(Model model) {
+        model.addAttribute("currentPage", "redact");
+        return "security/redact";
+    }
+
     @GetMapping("/add-password")
     @Hidden
     public String addPasswordForm(Model model) {
@@ -51,6 +57,20 @@ public class SecurityWebController {
     public String certSignForm(Model model) {
         model.addAttribute("currentPage", "cert-sign");
         return "security/cert-sign";
+    }
+
+    @GetMapping("/validate-signature")
+    @Hidden
+    public String certSignVerifyForm(Model model) {
+        model.addAttribute("currentPage", "validate-signature");
+        return "security/validate-signature";
+    }
+
+    @GetMapping("/remove-cert-sign")
+    @Hidden
+    public String certUnSignForm(Model model) {
+        model.addAttribute("currentPage", "remove-cert-sign");
+        return "security/remove-cert-sign";
     }
 
     @GetMapping("/sanitize-pdf")

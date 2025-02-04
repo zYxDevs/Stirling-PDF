@@ -1,9 +1,10 @@
 package stirling.software.SPDF.controller.api;
 
-import java.awt.Color;
+import java.awt.*;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.multipdf.LayerUtility;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -11,8 +12,7 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.util.Matrix;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,10 +20,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import stirling.software.SPDF.model.api.general.MergeMultiplePagesRequest;
+import stirling.software.SPDF.service.CustomPDDocumentFactory;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
 @RestController
@@ -31,7 +33,12 @@ import stirling.software.SPDF.utils.WebResponseUtils;
 @Tag(name = "General", description = "General APIs")
 public class MultiPageLayoutController {
 
-    private static final Logger logger = LoggerFactory.getLogger(MultiPageLayoutController.class);
+    private final CustomPDDocumentFactory pdfDocumentFactory;
+
+    @Autowired
+    public MultiPageLayoutController(CustomPDDocumentFactory pdfDocumentFactory) {
+        this.pdfDocumentFactory = pdfDocumentFactory;
+    }
 
     @PostMapping(value = "/multi-page-layout", consumes = "multipart/form-data")
     @Operation(
@@ -57,8 +64,9 @@ public class MultiPageLayoutController {
                         : (int) Math.sqrt(pagesPerSheet);
         int rows = pagesPerSheet == 2 || pagesPerSheet == 3 ? 1 : (int) Math.sqrt(pagesPerSheet);
 
-        PDDocument sourceDocument = PDDocument.load(file.getInputStream());
-        PDDocument newDocument = new PDDocument();
+        PDDocument sourceDocument = Loader.loadPDF(file.getBytes());
+        PDDocument newDocument =
+                pdfDocumentFactory.createNewDocumentBasedOnOldDocument(sourceDocument);
         PDPage newPage = new PDPage(PDRectangle.A4);
         newDocument.addPage(newPage);
 
@@ -135,6 +143,7 @@ public class MultiPageLayoutController {
         byte[] result = baos.toByteArray();
         return WebResponseUtils.bytesToWebResponse(
                 result,
-                file.getOriginalFilename().replaceFirst("[.][^.]+$", "") + "_layoutChanged.pdf");
+                Filenames.toSimpleFileName(file.getOriginalFilename()).replaceFirst("[.][^.]+$", "")
+                        + "_layoutChanged.pdf");
     }
 }

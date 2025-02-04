@@ -1,11 +1,12 @@
 package stirling.software.SPDF.controller.api.security;
 
-import java.awt.Color;
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 
 import javax.imageio.ImageIO;
 
@@ -16,10 +17,12 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType0Font;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
 import org.apache.pdfbox.util.Matrix;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -28,16 +31,26 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import stirling.software.SPDF.model.api.security.AddWatermarkRequest;
+import stirling.software.SPDF.service.CustomPDDocumentFactory;
+import stirling.software.SPDF.utils.PdfUtils;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
 @RestController
 @RequestMapping("/api/v1/security")
 @Tag(name = "Security", description = "Security APIs")
 public class WatermarkController {
+
+    private final CustomPDDocumentFactory pdfDocumentFactory;
+
+    @Autowired
+    public WatermarkController(CustomPDDocumentFactory pdfDocumentFactory) {
+        this.pdfDocumentFactory = pdfDocumentFactory;
+    }
 
     @PostMapping(consumes = "multipart/form-data", value = "/add-watermark")
     @Operation(
@@ -56,9 +69,11 @@ public class WatermarkController {
         float opacity = request.getOpacity();
         int widthSpacer = request.getWidthSpacer();
         int heightSpacer = request.getHeightSpacer();
+        String customColor = request.getCustomColor();
+        boolean convertPdfToImage = request.isConvertPDFToImage();
 
         // Load the input PDF
-        PDDocument document = PDDocument.load(pdfFile.getInputStream());
+        PDDocument document = pdfDocumentFactory.load(pdfFile);
 
         // Create a page in the document
         for (PDPage page : document.getPages()) {
@@ -66,14 +81,14 @@ public class WatermarkController {
             // Get the page's content stream
             PDPageContentStream contentStream =
                     new PDPageContentStream(
-                            document, page, PDPageContentStream.AppendMode.APPEND, true);
+                            document, page, PDPageContentStream.AppendMode.APPEND, true, true);
 
             // Set transparency
             PDExtendedGraphicsState graphicsState = new PDExtendedGraphicsState();
             graphicsState.setNonStrokingAlphaConstant(opacity);
             contentStream.setGraphicsStateParameters(graphicsState);
 
-            if (watermarkType.equalsIgnoreCase("text")) {
+            if ("text".equalsIgnoreCase(watermarkType)) {
                 addTextWatermark(
                         contentStream,
                         watermarkText,
@@ -83,8 +98,9 @@ public class WatermarkController {
                         widthSpacer,
                         heightSpacer,
                         fontSize,
-                        alphabet);
-            } else if (watermarkType.equalsIgnoreCase("image")) {
+                        alphabet,
+                        customColor);
+            } else if ("image".equalsIgnoreCase(watermarkType)) {
                 addImageWatermark(
                         contentStream,
                         watermarkImage,
@@ -100,9 +116,17 @@ public class WatermarkController {
             contentStream.close();
         }
 
+        if (convertPdfToImage) {
+            PDDocument convertedPdf = PdfUtils.convertPdfToPdfImage(document);
+            document.close();
+            document = convertedPdf;
+        }
+
         return WebResponseUtils.pdfDocToWebResponse(
                 document,
-                pdfFile.getOriginalFilename().replaceFirst("[.][^.]+$", "") + "_watermarked.pdf");
+                Filenames.toSimpleFileName(pdfFile.getOriginalFilename())
+                                .replaceFirst("[.][^.]+$", "")
+                        + "_watermarked.pdf");
     }
 
     private void addTextWatermark(
@@ -114,10 +138,11 @@ public class WatermarkController {
             int widthSpacer,
             int heightSpacer,
             float fontSize,
-            String alphabet)
+            String alphabet,
+            String colorString)
             throws IOException {
         String resourceDir = "";
-        PDFont font = PDType1Font.HELVETICA_BOLD;
+        PDFont font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
         switch (alphabet) {
             case "arabic":
                 resourceDir = "static/fonts/NotoSansArabic-Regular.ttf";
@@ -137,40 +162,77 @@ public class WatermarkController {
                 break;
         }
 
-        if (!resourceDir.equals("")) {
+        if (!"".equals(resourceDir)) {
             ClassPathResource classPathResource = new ClassPathResource(resourceDir);
             String fileExtension = resourceDir.substring(resourceDir.lastIndexOf("."));
-            File tempFile = File.createTempFile("NotoSansFont", fileExtension);
+            File tempFile = Files.createTempFile("NotoSansFont", fileExtension).toFile();
             try (InputStream is = classPathResource.getInputStream();
                     FileOutputStream os = new FileOutputStream(tempFile)) {
                 IOUtils.copy(is, os);
+                font = PDType0Font.load(document, tempFile);
+            } finally {
+                if (tempFile != null) Files.deleteIfExists(tempFile.toPath());
             }
-
-            font = PDType0Font.load(document, tempFile);
-            tempFile.deleteOnExit();
         }
 
         contentStream.setFont(font, fontSize);
-        contentStream.setNonStrokingColor(Color.LIGHT_GRAY);
+
+        Color redactColor;
+        try {
+            if (!colorString.startsWith("#")) {
+                colorString = "#" + colorString;
+            }
+            redactColor = Color.decode(colorString);
+        } catch (NumberFormatException e) {
+
+            redactColor = Color.LIGHT_GRAY;
+        }
+        contentStream.setNonStrokingColor(redactColor);
+
+        String[] textLines = watermarkText.split("\\\\n");
+        float maxLineWidth = 0;
+
+        for (int i = 0; i < textLines.length; ++i) {
+            maxLineWidth = Math.max(maxLineWidth, font.getStringWidth(textLines[i]));
+        }
 
         // Set size and location of text watermark
-        float watermarkWidth = widthSpacer + font.getStringWidth(watermarkText) * fontSize / 1000;
-        float watermarkHeight = heightSpacer + fontSize;
+        float watermarkWidth = widthSpacer + maxLineWidth * fontSize / 1000;
+        float watermarkHeight = heightSpacer + fontSize * textLines.length;
         float pageWidth = page.getMediaBox().getWidth();
         float pageHeight = page.getMediaBox().getHeight();
-        int watermarkRows = (int) (pageHeight / watermarkHeight + 1);
-        int watermarkCols = (int) (pageWidth / watermarkWidth + 1);
+
+        // Calculating the new width and height depending on the angle.
+        float radians = (float) Math.toRadians(rotation);
+        float newWatermarkWidth =
+                (float)
+                        (Math.abs(watermarkWidth * Math.cos(radians))
+                                + Math.abs(watermarkHeight * Math.sin(radians)));
+        float newWatermarkHeight =
+                (float)
+                        (Math.abs(watermarkWidth * Math.sin(radians))
+                                + Math.abs(watermarkHeight * Math.cos(radians)));
+
+        // Calculating the number of rows and columns.
+
+        int watermarkRows = (int) (pageHeight / newWatermarkHeight + 1);
+        int watermarkCols = (int) (pageWidth / newWatermarkWidth + 1);
 
         // Add the text watermark
-        for (int i = 0; i < watermarkRows; i++) {
-            for (int j = 0; j < watermarkCols; j++) {
+        for (int i = 0; i <= watermarkRows; i++) {
+            for (int j = 0; j <= watermarkCols; j++) {
                 contentStream.beginText();
                 contentStream.setTextMatrix(
                         Matrix.getRotateInstance(
                                 (float) Math.toRadians(rotation),
-                                j * watermarkWidth,
-                                i * watermarkHeight));
-                contentStream.showText(watermarkText);
+                                j * newWatermarkWidth,
+                                i * newWatermarkHeight));
+
+                for (int k = 0; k < textLines.length; ++k) {
+                    contentStream.showText(textLines[k]);
+                    contentStream.newLineAtOffset(0, -fontSize);
+                }
+
                 contentStream.endText();
             }
         }

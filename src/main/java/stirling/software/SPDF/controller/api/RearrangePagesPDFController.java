@@ -2,12 +2,13 @@ package stirling.software.SPDF.controller.api;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,21 +16,30 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import lombok.extern.slf4j.Slf4j;
 import stirling.software.SPDF.model.SortTypes;
 import stirling.software.SPDF.model.api.PDFWithPageNums;
 import stirling.software.SPDF.model.api.general.RearrangePagesRequest;
+import stirling.software.SPDF.service.CustomPDDocumentFactory;
 import stirling.software.SPDF.utils.GeneralUtils;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
 @RestController
 @RequestMapping("/api/v1/general")
+@Slf4j
 @Tag(name = "General", description = "General APIs")
 public class RearrangePagesPDFController {
 
-    private static final Logger logger = LoggerFactory.getLogger(RearrangePagesPDFController.class);
+    private final CustomPDDocumentFactory pdfDocumentFactory;
+
+    @Autowired
+    public RearrangePagesPDFController(CustomPDDocumentFactory pdfDocumentFactory) {
+        this.pdfDocumentFactory = pdfDocumentFactory;
+    }
 
     @PostMapping(consumes = "multipart/form-data", value = "/remove-pages")
     @Operation(
@@ -42,13 +52,15 @@ public class RearrangePagesPDFController {
         MultipartFile pdfFile = request.getFileInput();
         String pagesToDelete = request.getPageNumbers();
 
-        PDDocument document = PDDocument.load(pdfFile.getBytes());
+        PDDocument document = pdfDocumentFactory.load(pdfFile);
 
         // Split the page order string into an array of page numbers or range of numbers
         String[] pageOrderArr = pagesToDelete.split(",");
 
         List<Integer> pagesToRemove =
-                GeneralUtils.parsePageList(pageOrderArr, document.getNumberOfPages());
+                GeneralUtils.parsePageList(pageOrderArr, document.getNumberOfPages(), false);
+
+        Collections.sort(pagesToRemove);
 
         for (int i = pagesToRemove.size() - 1; i >= 0; i--) {
             int pageIndex = pagesToRemove.get(i);
@@ -56,7 +68,9 @@ public class RearrangePagesPDFController {
         }
         return WebResponseUtils.pdfDocToWebResponse(
                 document,
-                pdfFile.getOriginalFilename().replaceFirst("[.][^.]+$", "") + "_removed_pages.pdf");
+                Filenames.toSimpleFileName(pdfFile.getOriginalFilename())
+                                .replaceFirst("[.][^.]+$", "")
+                        + "_removed_pages.pdf");
     }
 
     private List<Integer> removeFirst(int totalPages) {
@@ -138,6 +152,28 @@ public class RearrangePagesPDFController {
         return newPageOrder;
     }
 
+    /**
+     * Rearrange pages in a PDF file by merging odd and even pages. The first half of the pages will
+     * be the odd pages, and the second half will be the even pages as input. <br>
+     * This method is visible for testing purposes only.
+     *
+     * @param totalPages Total number of pages in the PDF file.
+     * @return List of page numbers in the new order. The first page is 0.
+     */
+    List<Integer> oddEvenMerge(int totalPages) {
+        List<Integer> newPageOrderZeroBased = new ArrayList<>();
+        int numberOfOddPages = (totalPages + 1) / 2;
+
+        for (int oneBasedIndex = 1; oneBasedIndex < (numberOfOddPages + 1); oneBasedIndex++) {
+            newPageOrderZeroBased.add((oneBasedIndex - 1));
+            if (numberOfOddPages + oneBasedIndex <= totalPages) {
+                newPageOrderZeroBased.add((numberOfOddPages + oneBasedIndex - 1));
+            }
+        }
+
+        return newPageOrderZeroBased;
+    }
+
     private List<Integer> processSortTypes(String sortTypes, int totalPages) {
         try {
             SortTypes mode = SortTypes.valueOf(sortTypes.toUpperCase());
@@ -152,6 +188,8 @@ public class RearrangePagesPDFController {
                     return sideStitchBooklet(totalPages);
                 case ODD_EVEN_SPLIT:
                     return oddEvenSplit(totalPages);
+                case ODD_EVEN_MERGE:
+                    return oddEvenMerge(totalPages);
                 case REMOVE_FIRST:
                     return removeFirst(totalPages);
                 case REMOVE_LAST:
@@ -162,7 +200,7 @@ public class RearrangePagesPDFController {
                     throw new IllegalArgumentException("Unsupported custom mode");
             }
         } catch (IllegalArgumentException e) {
-            logger.error("Unsupported custom mode", e);
+            log.error("Unsupported custom mode", e);
             return null;
         }
     }
@@ -179,7 +217,7 @@ public class RearrangePagesPDFController {
         String sortType = request.getCustomMode();
         try {
             // Load the input PDF
-            PDDocument document = PDDocument.load(pdfFile.getInputStream());
+            PDDocument document = Loader.loadPDF(pdfFile.getBytes());
 
             // Split the page order string into an array of page numbers or range of numbers
             String[] pageOrderArr = pageOrder != null ? pageOrder.split(",") : new String[0];
@@ -188,10 +226,10 @@ public class RearrangePagesPDFController {
             if (sortType != null && sortType.length() > 0) {
                 newPageOrder = processSortTypes(sortType, totalPages);
             } else {
-                newPageOrder = GeneralUtils.parsePageList(pageOrderArr, totalPages);
+                newPageOrder = GeneralUtils.parsePageList(pageOrderArr, totalPages, false);
             }
-            logger.info("newPageOrder = " + newPageOrder);
-            logger.info("totalPages = " + totalPages);
+            log.info("newPageOrder = " + newPageOrder);
+            log.info("totalPages = " + totalPages);
             // Create a new list to hold the pages in the new order
             List<PDPage> newPages = new ArrayList<>();
             for (int i = 0; i < newPageOrder.size(); i++) {
@@ -210,10 +248,11 @@ public class RearrangePagesPDFController {
 
             return WebResponseUtils.pdfDocToWebResponse(
                     document,
-                    pdfFile.getOriginalFilename().replaceFirst("[.][^.]+$", "")
+                    Filenames.toSimpleFileName(pdfFile.getOriginalFilename())
+                                    .replaceFirst("[.][^.]+$", "")
                             + "_rearranged.pdf");
         } catch (IOException e) {
-            logger.error("Failed rearranging documents", e);
+            log.error("Failed rearranging documents", e);
             return null;
         }
     }

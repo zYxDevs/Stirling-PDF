@@ -14,7 +14,7 @@ public class SignPDFWithCertRequest extends PDFFile {
 
     @Schema(
             description = "The type of the digital certificate",
-            allowableValues = {"PKCS12", "PEM"})
+            allowableValues = {"PEM", "PKCS12", "JKS"})
     private String certType;
 
     @Schema(
@@ -27,6 +27,9 @@ public class SignPDFWithCertRequest extends PDFFile {
 
     @Schema(description = "The PKCS12 keystore file (required for PKCS12 type certificates)")
     private MultipartFile p12File;
+
+    @Schema(description = "The JKS keystore file (Java Key Store)")
+    private MultipartFile jksFile;
 
     @Schema(description = "The password for the keystore or the private key")
     private String password;
@@ -47,4 +50,7 @@ public class SignPDFWithCertRequest extends PDFFile {
             description =
                     "The page number where the signature should be visible. This is required if showSignature is set to true")
     private Integer pageNumber;
+
+    @Schema(description = "Whether to visually show a signature logo along with the signature")
+    private boolean showLogo;
 }

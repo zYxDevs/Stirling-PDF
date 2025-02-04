@@ -4,11 +4,7 @@ import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import jakarta.servlet.Filter;
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.ServletRequest;
-import jakarta.servlet.ServletResponse;
+import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import stirling.software.SPDF.utils.RequestUriUtils;
 
@@ -33,7 +29,8 @@ public class IPRateLimitingFilter implements Filter {
             String method = httpRequest.getMethod();
             String requestURI = httpRequest.getRequestURI();
             // Check if the request is for static resources
-            boolean isStaticResource = RequestUriUtils.isStaticResource(requestURI);
+            boolean isStaticResource =
+                    RequestUriUtils.isStaticResource(httpRequest.getContextPath(), requestURI);
 
             // If it's a static resource, just continue the filter chain and skip the logic below
             if (isStaticResource) {
